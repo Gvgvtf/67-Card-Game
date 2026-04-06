@@ -18,14 +18,14 @@ import java.util.List;
  */
 public class Player {
 
-    public static final int INITIAL_HAND = 5;
+    public static final int INITIAL_HAND = 7;
 
     private String     name;
     private List<Card> hand;
     private Deck       deck;
     private Card       lastPlayedCard;
 
-    // ── Two-step standard card selection state ────────────────────────────────
+    // Two-step standard card selection state.
     private Card pendingCard;
     private int  pendingIndex;
 
@@ -37,14 +37,13 @@ public class Player {
         this.pendingIndex = -1;
     }
 
-    // =========================================================================
     // Turn Management
-    // =========================================================================
 
     /**
-     * Called at the start of this player's turn.
+     * Called at the start of the player's turn.
      * Draws 1 card from the deck and resets pending state.
      */
+
     public String startTurn() {
         clearPending();
         Card drawn = deck.draw();
@@ -57,16 +56,12 @@ public class Player {
     }
 
     /**
-     * Deals the initial hand at the start of the game (no draw-1 rule here).
+     * Deals the initial hand at the start of the game.
      */
     public void dealInitialHand() {
         List<Card> drawn = deck.drawMultiple(INITIAL_HAND);
         hand.addAll(drawn);
     }
-
-    // =========================================================================
-    // Standard Card — Two-Step Selection (same logic as before)
-    // =========================================================================
 
     /**
      * Step 1: player selects a standard card.
@@ -74,6 +69,7 @@ public class Player {
      * Returns null and sets pendingCard if the card can form a valid pair.
      * Returns null and does nothing if the card has no valid play.
      */
+
     public GameAction selectStandardCard(int handIndex) {
         if (handIndex < 0 || handIndex >= hand.size()) return null;
         Card card = hand.get(handIndex);
@@ -82,26 +78,27 @@ public class Player {
         // Cancel pending if same card clicked again
         if (pendingIndex == handIndex) { clearPending(); return null; }
 
-        // Solo 6 or 7
+        // Solo 6 or 7.
         if (card.getValue() == 6 || card.getValue() == 7) {
             clearPending();
             return commitSingleStandard(handIndex);
         }
 
-        // Can pair with something
+        // Can pair with something.
         if (canFormAnyPair(handIndex)) {
             pendingCard  = card;
             pendingIndex = handIndex;
             return null;
         }
 
-        return null; // no valid play
+        return null; // no valid play.
     }
 
     /**
      * Step 2: player selects the second card of a pair.
      * Commits both to discard if valid; clears pending if not.
      */
+
     public GameAction selectSecondCard(int handIndex) {
         if (pendingCard == null)                        return null;
         if (handIndex < 0 || handIndex >= hand.size()) return null;
@@ -116,16 +113,13 @@ public class Player {
         return commitPair(pendingIndex, handIndex, result);
     }
 
-    // =========================================================================
-    // Special Cards
-    // =========================================================================
-
     /**
      * Removes the special card at handIndex from hand and discards it.
      * The caller (GameServer / GameFrame) is responsible for applying
      * the actual effect to the correct target card.
      * Returns the special card that was played, or null if invalid.
      */
+
     public Card playSpecialCard(int handIndex) {
         if (handIndex < 0 || handIndex >= hand.size()) return null;
         Card card = hand.get(handIndex);
@@ -137,13 +131,14 @@ public class Player {
         return card;
     }
 
-    // ── VALUE_SHIFT effect ────────────────────────────────────────────────────
+    // VALUE_SHIFT effect.
 
     /**
      * Applies +1 or -1 to the card at targetIndex in this player's hand.
      * delta must be +1 or -1.
      * Does nothing if the target is itself a special card.
      */
+
     public String applyValueShift(int targetIndex, int delta) {
         if (targetIndex < 0 || targetIndex >= hand.size()) return "Invalid target.";
         Card target = hand.get(targetIndex);
@@ -157,7 +152,7 @@ public class Player {
             + " changed from " + oldVal + " to " + newVal + ".";
     }
 
-    // ── MOVE_CARD effect ──────────────────────────────────────────────────────
+    // MOVE_CARD effect.
 
     /**
      * Moves the card at targetIndex one position in the given direction.
@@ -165,6 +160,7 @@ public class Player {
      * Movement is blocked if the card is already at the corresponding edge.
      * Returns a log message.
      */
+
     public String applyMoveCard(int targetIndex, int direction) {
         if (targetIndex < 0 || targetIndex >= hand.size()) return "Invalid target.";
 
@@ -188,6 +184,7 @@ public class Player {
      * -1 (left) is valid if targetIndex > 0.
      * +1 (right) is valid if targetIndex < hand.size() - 1.
      */
+
     public List<Integer> validMoveDirections(int targetIndex) {
         List<Integer> dirs = new ArrayList<>();
         if (targetIndex > 0)               dirs.add(-1);
@@ -195,9 +192,7 @@ public class Player {
         return dirs;
     }
 
-    // =========================================================================
     // Pass Turn
-    // =========================================================================
 
     /**
      * Player passes — draws 1 extra card as compensation.
@@ -213,15 +208,14 @@ public class Player {
         return action;
     }
 
-    // =========================================================================
     // Win Condition
-    // =========================================================================
 
     /**
      * Win condition: hand has exactly 2 cards,
      * index 0 (left) is a standard 6,
      * index 1 (right) is a standard 7.
      */
+
     public boolean hasWon() {
         if (hand.size() != 2) return false;
         Card left  = hand.get(0);
@@ -230,11 +224,7 @@ public class Player {
             && right.getType() == Card.CardType.STANDARD && right.getValue() == 7;
     }
 
-    // =========================================================================
-    // Combination Helpers
-    // =========================================================================
-
-    /** Returns 6 or 7 if any operation on a and b hits that target, else -1. */
+    // Returns 6 or 7 if any operation on a and b hits that target, else -1.
     public static int combinedResult(int a, int b) {
         if (a + b == 6 || a + b == 7)                      return a + b;
         if (Math.abs(a - b) == 6 || Math.abs(a - b) == 7)  return Math.abs(a - b);
@@ -242,6 +232,7 @@ public class Player {
         return -1;
     }
 
+    // Checks if the card at handIndex can form a valid pair with any other card in hand.
     public boolean canFormAnyPair(int handIndex) {
         Card card = hand.get(handIndex);
         for (int i = 0; i < hand.size(); i++) {
@@ -253,6 +244,7 @@ public class Player {
         return false;
     }
 
+    // Checks which cards in hand can form a valid pair with the pending card.
     public List<Integer> validSecondCards() {
         List<Integer> valid = new ArrayList<>();
         if (pendingCard == null) return valid;
@@ -265,6 +257,7 @@ public class Player {
         return valid;
     }
 
+    // Checks if the player has any valid play with the current hand.
     public boolean hasAnyValidPlay() {
         for (int i = 0; i < hand.size(); i++) {
             Card c = hand.get(i);
@@ -275,10 +268,7 @@ public class Player {
         return false;
     }
 
-    // =========================================================================
-    // Private Commit Helpers
-    // =========================================================================
-
+    // Commits the play of a single standard card (6 or 7) and returns the corresponding GameAction.
     private GameAction commitSingleStandard(int handIndex) {
         Card card = hand.remove(handIndex);
         lastPlayedCard = card;
@@ -289,6 +279,7 @@ public class Player {
         return action;
     }
 
+    // Commits the play of a pair of standard cards and returns the corresponding GameAction.
     private GameAction commitPair(int firstIndex, int secondIndex, int result) {
         int hi = Math.max(firstIndex, secondIndex);
         int lo = Math.min(firstIndex, secondIndex);
@@ -319,10 +310,7 @@ public class Player {
         pendingIndex = -1;
     }
 
-    // =========================================================================
-    // Serialisation
-    // =========================================================================
-
+    // Serializes the player's hand to a string format for network transmission.
     public String serializeHand() {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < hand.size(); i++) {
@@ -331,10 +319,6 @@ public class Player {
         }
         return sb.toString();
     }
-
-    // =========================================================================
-    // Getters
-    // =========================================================================
 
     public boolean    hasPending()       { return pendingCard != null; }
     public Card       getPendingCard()   { return pendingCard; }

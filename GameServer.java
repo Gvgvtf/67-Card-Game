@@ -4,7 +4,7 @@ import java.util.*;
 
 /**
  * GameServer — manages the card game.
- * No HP. Win condition: first player whose hand is exactly [6, 7] (left to right) wins.
+ * Win condition: first player whose hand is exactly [6, 7] (left to right) wins.
  */
 public class GameServer {
 
@@ -24,6 +24,7 @@ public class GameServer {
         currentTurn = 0;
     }
 
+    // Starts the server and waits for both players to connect before starting the game.
     public void start() {
         try {
             serverSocket = new ServerSocket(PORT);
@@ -43,6 +44,7 @@ public class GameServer {
         }
     }
 
+    // Initializes the game state and notifies clients to start the game.
     private void startGame() {
         gameStarted = true;
 
@@ -51,6 +53,7 @@ public class GameServer {
 
         broadcast("GAME_START", null);
 
+        // Send each client their player index and opponent's name for UI purposes.
         for (int i = 0; i < clients.size(); i++) {
             ClientHandler c   = clients.get(i);
             ClientHandler opp = clients.get(1 - i);
@@ -61,12 +64,11 @@ public class GameServer {
         advanceTurn(-1);
     }
 
-    // ── Action Resolution ─────────────────────────────────────────────────────
-
     /**
      * Resolves any action sent by a client.
      * After resolution, checks win condition then advances the turn.
      */
+
     public synchronized void resolveAction(GameAction action, int senderIndex) {
         if (senderIndex != currentTurn) {
             clients.get(senderIndex).sendMessage("ERROR|Not your turn.");
@@ -76,7 +78,6 @@ public class GameServer {
         ClientHandler sender   = clients.get(senderIndex);
         ClientHandler opponent = clients.get(1 - senderIndex);
 
-        // Pass — message already set in Player.passTurn()
         if (action.isPass()) {
             broadcast(action.serialize(), null);
             checkWinThenAdvance(senderIndex);
@@ -86,20 +87,19 @@ public class GameServer {
         Card.CardType type = action.getCard().getType();
 
         if (type == Card.CardType.VALUE_SHIFT) {
-            // Apply +1 or -1 to the targeted card
             Player target = action.getTargetOwner().equals(GameAction.TARGET_SELF)
                           ? sender.getPlayer() : opponent.getPlayer();
+
             String log = target.applyValueShift(action.getTargetIndex(), action.getDelta());
             action.setMessage(action.getMessage() + " " + log);
 
         } else if (type == Card.CardType.MOVE_CARD) {
-            // Move a card left or right in the targeted hand
             Player target = action.getTargetOwner().equals(GameAction.TARGET_SELF)
                           ? sender.getPlayer() : opponent.getPlayer();
+
             String log = target.applyMoveCard(action.getTargetIndex(), action.getDelta());
             action.setMessage(action.getMessage() + " " + log);
         }
-        // Standard card actions: message already fully set in Player
 
         broadcast(action.serialize(), null);
         checkWinThenAdvance(senderIndex);
@@ -160,8 +160,6 @@ public class GameServer {
         new GameServer().start();
     }
 
-    // ── ClientHandler ─────────────────────────────────────────────────────────
-
     static class ClientHandler implements Runnable {
 
         private Socket         socket;
@@ -202,7 +200,6 @@ public class GameServer {
 
         private void handleMessage(String msg) {
             if (msg.startsWith("PLAY_CARD|")) {
-                // Solo standard card (6 or 7) or special card trigger
                 int idx = Integer.parseInt(msg.split("\\|")[1]);
                 if (idx < 0 || idx >= player.getHand().size()) return;
                 Card card = player.getHand().get(idx);
@@ -211,7 +208,6 @@ public class GameServer {
                     action = player.selectStandardCard(idx);
                     if (action != null) server.resolveAction(action, playerIndex);
                 }
-                // Special cards are handled by SPECIAL_ACTION after targeting
 
             } else if (msg.startsWith("PLAY_PAIR|")) {
                 String[] p = msg.split("\\|");
@@ -222,8 +218,6 @@ public class GameServer {
                 if (action != null) server.resolveAction(action, playerIndex);
 
             } else if (msg.startsWith("SPECIAL_ACTION|")) {
-                // Format: SPECIAL_ACTION|<cardIndex>|<targetOwner>|<targetIndex>|<delta>
-                // delta = +1/-1 for VALUE_SHIFT, -1/+1 for MOVE_CARD direction
                 String[] p        = msg.split("\\|");
                 int  cardIdx      = Integer.parseInt(p[1]);
                 String targetOwner = p[2];
@@ -241,12 +235,12 @@ public class GameServer {
                 server.resolveAction(action, playerIndex);
 
             } else if (msg.equals("REQUEST_OPPONENT_HAND")) {
+
                 // Send the opponent's hand to this client for targeting UI
                 if (server.clients.size() == 2) {
                     ClientHandler opp = server.clients.get(1 - playerIndex);
                     sendMessage("OPPONENT_HAND|" + opp.getPlayer().serializeHand());
                 }
-
             } else if (msg.equals("PASS_TURN")) {
                 GameAction action = player.passTurn();
                 server.resolveAction(action, playerIndex);

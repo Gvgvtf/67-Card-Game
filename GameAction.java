@@ -6,9 +6,10 @@
  * MOVE_CARD      : targetOwner, targetIndex, direction (-1 left, +1 right).
  * Pass           : pass = true.
  */
+
 public class GameAction {
 
-    // Who owns the targeted card: "self" or "opponent"
+    // Identifies the owner of the card that has been played: "self" or "opponent"
     public static final String TARGET_SELF     = "self";
     public static final String TARGET_OPPONENT = "opponent";
 
@@ -32,20 +33,23 @@ public class GameAction {
         this.delta       = 0;
     }
 
-    // ── Serialisation ─────────────────────────────────────────────────────────
-    // Format: ACTION|<card>|<playerName>|<pass>|<targetOwner>|<targetIndex>|<delta>|<message>
+    /**
+    * Serialisation of GameAction to a string format.
+    * Format: ACTION|<card>|<playerName>|<pass>|<targetOwner>|<targetIndex>|<delta>|<message>
+    */
 
     public String serialize() {
         return "ACTION|"
-            + card.serialize()              + "|"
-            + playerName                    + "|"
-            + pass                          + "|"
+            + card.serialize()                            + "|"
+            + playerName                                  + "|"
+            + pass                                        + "|"
             + (targetOwner.isEmpty() ? "-" : targetOwner) + "|"
-            + targetIndex                   + "|"
-            + delta                         + "|"
+            + targetIndex                                 + "|"
+            + delta                                       + "|"
             + message.replace("|", "~");
     }
 
+    // Deserialization of GameAction back to a Java object.
     public static GameAction deserialize(String data) {
         String[] p  = data.split("\\|", 8);
         Card     c  = Card.deserialize(p[1]);
@@ -64,8 +68,6 @@ public class GameAction {
         a.setMessage(msg);
         return a;
     }
-
-    // ── Getters & Setters ─────────────────────────────────────────────────────
 
     public Card    getCard()         { return card; }
     public String  getPlayerName()   { return playerName; }

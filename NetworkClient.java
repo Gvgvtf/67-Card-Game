@@ -3,9 +3,8 @@ import java.net.*;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * NetworkClient — manages the socket connection on the player's side.
- */
+// NetworkClient — manages the socket connection on the player's side.
+
 public class NetworkClient {
 
     private static final String HOST = "localhost";
@@ -61,12 +60,11 @@ public class NetworkClient {
                 canvas.appendLog("Game started! First to arrange 6 (left) and 7 (right) wins!"));
 
         } else if (msg.startsWith("YOUR_INDEX|")) {
-            // stored if needed
 
         } else if (msg.startsWith("OPPONENT_NAME|")) {
             String oppName = msg.split("\\|")[1];
             javax.swing.SwingUtilities.invokeLater(() ->
-                canvas.setOpponentInfo(oppName, 5));
+                canvas.setOpponentInfo(oppName, 7));
 
         } else if (msg.startsWith("YOUR_TURN|")) {
             // YOUR_TURN|<serializedHand>|<deckRemaining>
@@ -98,9 +96,12 @@ public class NetworkClient {
                 frame.refresh();
             });
 
+        /**
+        * Sent when this player requests opponent hand for targeting
+        * Format: OPPONENT_HAND|<serializedHand>
+        */
+       
         } else if (msg.startsWith("OPPONENT_HAND|")) {
-            // Sent when this player requests opponent hand for targeting
-            // Format: OPPONENT_HAND|<serializedHand>
             String handData = msg.split("\\|", 2)[1];
             List<Card> oppCards = deserializeHand(handData);
             javax.swing.SwingUtilities.invokeLater(() ->

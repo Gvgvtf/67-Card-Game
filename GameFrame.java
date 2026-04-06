@@ -5,6 +5,7 @@ import java.awt.event.*;
  * GameFrame — main JFrame. Wires all mouse interactions to the correct
  * game actions and sends messages to the server via NetworkClient.
  */
+
 public class GameFrame extends JFrame {
 
     private GameCanvas    gameCanvas;
@@ -17,8 +18,9 @@ public class GameFrame extends JFrame {
         initFrame();
     }
 
+    // Initializes the JFrame and sets up mouse listeners for game interaction.
     private void initFrame() {
-        setTitle("Card Battle — " + player.getName());
+        setTitle("6 7 Card Battle — " + player.getName());
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setResizable(false);
 
@@ -39,15 +41,16 @@ public class GameFrame extends JFrame {
     }
 
     /**
-     * Central click dispatcher. Handles all game interaction phases:
+     * Handles all game interaction phases:
      *   1. Operation button selection (during special card targeting)
      *   2. Target selection (own card or opponent card)
      *   3. Normal play (standard cards, special card initiation, pass)
      */
+
     private void handleClick(int mx, int my) {
         if (!gameCanvas.isMyTurn()) return;
 
-        // ── Phase: choosing operation (+1/-1 or ←/→) ─────────────────────────
+        // Choosing operation (+1/-1 or ←/→).
         if (gameCanvas.isChoosingOp()) {
             int opResult = gameCanvas.getOperationButtonAt(mx, my);
             if (opResult != 0) {
@@ -62,31 +65,31 @@ public class GameFrame extends JFrame {
                 gameCanvas.clearOpponentMirror();
                 gameCanvas.setMyTurn(false);
             }
-            // Clicking outside buttons does nothing — player must choose
             return;
         }
 
-        // ── Phase: choosing target card ───────────────────────────────────────
+        // Choosing target card.
         if (gameCanvas.isChoosingTarget()) {
+
             // Check opponent's row first
             int oppIdx = gameCanvas.getOpponentCardIndexAt(mx, my);
             if (oppIdx >= 0) {
                 gameCanvas.confirmTarget(GameAction.TARGET_OPPONENT, oppIdx);
                 return;
             }
+
             // Check own row
             int ownIdx = gameCanvas.getCardIndexAt(mx, my);
             if (ownIdx >= 0) {
                 gameCanvas.confirmTarget(GameAction.TARGET_SELF, ownIdx);
                 return;
             }
-            // Clicked empty space — cancel special
+
+            // Clicked empty space results in cancelling special
             gameCanvas.cancelSpecial();
             gameCanvas.clearOpponentMirror();
             return;
         }
-
-        // ── Phase: normal play ────────────────────────────────────────────────
 
         // Pass button
         if (gameCanvas.isPassButtonAt(mx, my)) {
@@ -118,9 +121,10 @@ public class GameFrame extends JFrame {
                 network.sendMessage("PLAY_PAIR|" + firstIdx + "|" + idx);
                 gameCanvas.setMyTurn(false);
             } else {
-                // Cancel or invalid — re-select
+
+                // Cancel or invalid resulting in re-selection.
                 player.selectStandardCard(idx);
-                gameCanvas.refresh();
+                gameCanvas.repaint();
             }
         } else {
             int val = clicked.getValue();
@@ -129,9 +133,8 @@ public class GameFrame extends JFrame {
                 gameCanvas.setMyTurn(false);
             } else if (player.canFormAnyPair(idx)) {
                 player.selectStandardCard(idx);
-                gameCanvas.refresh();
+                gameCanvas.repaint();
             }
-            // No valid play from this card — do nothing
         }
     }
 

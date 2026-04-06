@@ -6,6 +6,7 @@
  *   VALUE_SHIFT — adds or subtracts 1 from any card in either player's hand.
  *   MOVE_CARD   — moves any card in either player's hand one position left or right.
  */
+
 public class Card {
 
     public enum CardType {
@@ -22,35 +23,33 @@ public class Card {
 
     private static int nextId = 1;
 
-    // ── Constructors ──────────────────────────────────────────────────────────
-
-    /** Standard numbered card (1–10). */
+    // Info for a standard number card (1–10).
     public Card(int value) {
         this.id          = nextId++;
         this.type        = CardType.STANDARD;
         this.value       = value;
         this.name        = String.valueOf(value);
         if (value == 6 || value == 7) {
-            this.description = "Play alone in winning position, or combine with another card.";
+            this.description = "One of the two cards needed to win. Secure the card in the winning slot or play it by itself.";
         } else {
-            this.description = "Pair with another card so they combine to 6 or 7.";
+            this.description = "Pair with another card so they combine to a 6 or 7.";
         }
     }
 
-    /** Special card. */
+    // Special card.
     public Card(CardType type) {
         this.id   = nextId++;
         this.type = type;
         switch (type) {
             case VALUE_SHIFT:
-                name        = "+1 / -1";
+                name        = "+1/-1";
                 value       = 0;
-                description = "Add or subtract 1 from any card in either hand.";
+                description = "Add or subtract 1 from any card in either player's hand.";
                 break;
             case MOVE_CARD:
                 name        = "Move";
                 value       = 0;
-                description = "Shift any card in either hand one position left or right.";
+                description = "Shift any card in either player's hand one position to the left or right.";
                 break;
             default:
                 name        = "Unknown";
@@ -59,13 +58,16 @@ public class Card {
         }
     }
 
-    // ── Serialisation ─────────────────────────────────────────────────────────
+    /** 
+     * Serializes the card to a string format.
+     * Format: "type:name:value:id"
+     */ 
 
-    /** Format: TYPE:name:value:id */
     public String serialize() {
         return type.name() + ":" + name + ":" + value + ":" + id;
     }
 
+    // Deserializes a card back to a Java object.
     public static Card deserialize(String data) {
         String[] parts = data.split(":");
         CardType type  = CardType.valueOf(parts[0]);
@@ -76,8 +78,6 @@ public class Card {
         return card;
     }
 
-    // ── Getters ───────────────────────────────────────────────────────────────
-
     public String   getName()        { return name; }
     public CardType getType()        { return type; }
     public int      getValue()       { return value; }
@@ -85,14 +85,14 @@ public class Card {
     public int      getId()          { return id; }
     public boolean  isSpecial()      { return type != CardType.STANDARD; }
 
-    /** Used by VALUE_SHIFT to mutate the card's numeric value. */
+    // Used by VALUE_SHIFT to change the card's numeric value.
     public void setValue(int value) {
         this.value = value;
         this.name  = String.valueOf(value);
         if (value == 6 || value == 7) {
-            this.description = "Play alone in winning position, or combine with another card.";
+            this.description = "One of the two cards needed to win. Secure the card in the winning slot or play it by itself.";
         } else {
-            this.description = "Pair with another card so they combine to 6 or 7.";
+            this.description = "Pair with another card so they combine to a 6 or 7.";
         }
     }
 

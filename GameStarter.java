@@ -1,8 +1,7 @@
 import javax.swing.*;
 
-/**
- * GameStarter — entry point for the player's client.
- */
+// GameStarter — entry point for the player's client.
+
 public class GameStarter {
 
     public static void main(String[] args) {
@@ -16,6 +15,7 @@ public class GameStarter {
 
         final String name = playerName.trim();
 
+        // Start the game client on the Swing event thread.
         SwingUtilities.invokeLater(() -> {
             Player        player  = new Player(name);
             NetworkClient network = new NetworkClient();
