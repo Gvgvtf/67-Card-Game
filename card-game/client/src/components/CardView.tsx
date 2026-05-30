@@ -64,6 +64,12 @@ export const CardView: React.FC<CardProps> = ({
         style={{ display: 'block', overflow: 'visible' }}
       >
         <defs>
+          <style>{`
+            @font-face {
+              font-family: 'SuperCartoon';
+              src: url('/fonts/SuperCartoon-6R791.ttf') format('truetype');
+            }
+          `}</style>
           {isWinCard && (
             <filter id={`glow-${card.id}`}>
               <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
@@ -144,46 +150,28 @@ function StandardCardFace({ card, W, H, colors, suitSymbol, isWinCard }: {
 }) {
   return (
     <>
-      {/* Subtle inner border for depth */}
-      <rect x="4" y="4" width={W - 8} height={H - 8} rx="5"
-        fill="none" stroke={colors.accent} strokeWidth="0.5" opacity="0.25" />
-
       {/* ── Top-left index ── */}
-      <text x="9" y="18" fontSize="13" fontWeight="700" fill={colors.text}
-        fontFamily="Georgia, serif">{card.name}</text>
-      <text x="10" y="28" fontSize="9" fill={colors.accent} opacity="0.8"
-        fontFamily="Georgia, serif">{suitSymbol}</text>
-
+      <text x="9" y="18" fontSize="13" fontWeight="400" fill={colors.text}
+        fontFamily="SuperCartoon, Arial, sans-serif">{card.name}</text>
       {/* ── Bottom-right index — directly positioned, NOT rotated ──
            Rotation was flipping 6 → looks like 9 and vice versa */}
-      <text x={W - 9} y={H - 15} fontSize="13" fontWeight="700" fill={colors.text}
-        fontFamily="Georgia, serif" textAnchor="end">{card.name}</text>
-      <text x={W - 10} y={H - 5} fontSize="9" fill={colors.accent} opacity="0.8"
-        fontFamily="Georgia, serif" textAnchor="end">{suitSymbol}</text>
+      <text x={W - 9} y={H - 15} fontSize="13" fontWeight="400" fill={colors.text}
+        fontFamily="SuperCartoon, Arial, sans-serif" textAnchor="end">{card.name}</text>
 
-      {/* ── Thin rules framing the centre zone ── */}
-      <line x1="7" y1="34" x2={W - 7} y2="34" stroke={colors.accent} strokeWidth="0.5" opacity="0.18" />
-      <line x1="7" y1={H - 34} x2={W - 7} y2={H - 34} stroke={colors.accent} strokeWidth="0.5" opacity="0.18" />
 
       {/* ── Large centre number ── */}
       <text
         x={W / 2} y={H / 2}
         fontSize={isWinCard ? "42" : "36"}
-        fontWeight="700"
+        fontWeight="400"
         fill={isWinCard ? colors.accent : colors.text}
         textAnchor="middle"
         dominantBaseline="middle"
-        fontFamily="Georgia, serif"
+        fontFamily="SuperCartoon, Arial, sans-serif"
         opacity="0.95"
       >{card.name}</text>
 
-      {/* ── Flanking suit pips beside the centre number ── */}
-      <text x={W / 2 - 22} y={H / 2} fontSize="8" fill={colors.accent}
-        textAnchor="middle" dominantBaseline="middle" opacity="0.3"
-        fontFamily="Georgia, serif">{suitSymbol}</text>
-      <text x={W / 2 + 22} y={H / 2} fontSize="8" fill={colors.accent}
-        textAnchor="middle" dominantBaseline="middle" opacity="0.3"
-        fontFamily="Georgia, serif">{suitSymbol}</text>
+
     </>
   );
 }
