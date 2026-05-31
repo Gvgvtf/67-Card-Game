@@ -24,6 +24,8 @@ interface LocalState {
   winner:         'human' | 'cpu' | 'draw' | null;
   deadlockPending: boolean;
   log:            string[];
+  /** Cards the CPU discarded on its most recent turn. Cleared when human acts. */
+  cpuLastDiscard: CardData[];
 }
 
 // ─────────────────────────────────────────────
@@ -78,6 +80,7 @@ function initLocalState(): LocalState {
     winner: null,
     deadlockPending: false,
     log: ['Game started'],
+    cpuLastDiscard: [],
   };
 }
 
@@ -103,8 +106,6 @@ function addLog(log: string[], entry: string): string[] {
   return [entry, ...log].slice(0, 20);
 }
 
-// VALUE_SHIFT applied inside the attacker's own hand
-// (special card is removed first, then target shifts)
 function applyValueShiftSelf(
   hand: CardData[], specialIdx: number, targetIdx: number, delta: number
 ): CardData[] {
@@ -117,7 +118,6 @@ function applyValueShiftSelf(
   );
 }
 
-// VALUE_SHIFT on an array without removing a special first (cross-hand)
 function applyValueShiftOn(hand: CardData[], targetIdx: number, delta: number): CardData[] {
   return hand.map((c, i) => {
     if (i !== targetIdx) return c;
@@ -126,7 +126,6 @@ function applyValueShiftOn(hand: CardData[], targetIdx: number, delta: number): 
   });
 }
 
-// Move a card inside its own array (no special removal needed)
 function moveCardInArray(arr: CardData[], idx: number, delta: number): CardData[] {
   const a = [...arr];
   const card = a[idx];
@@ -136,7 +135,6 @@ function moveCardInArray(arr: CardData[], idx: number, delta: number): CardData[
   return a;
 }
 
-// MOVE_CARD inside attacker's own hand
 function applyMoveSelf(
   hand: CardData[], specialIdx: number, targetIdx: number, delta: number
 ): CardData[] {
@@ -145,7 +143,6 @@ function applyMoveSelf(
   return moveCardInArray(h, adj, delta);
 }
 
-// OBSTACLE inside attacker's own hand
 function applyObstacleSelf(
   hand: CardData[], specialIdx: number, targetIdx: number, turns: number
 ): CardData[] {
@@ -154,12 +151,10 @@ function applyObstacleSelf(
   return h.map((c, i) => i === adj ? { ...c, obstacleturnsLeft: turns } : c);
 }
 
-// OBSTACLE on another hand (no special removal)
 function applyObstacleOn(hand: CardData[], targetIdx: number, turns: number): CardData[] {
   return hand.map((c, i) => i === targetIdx ? { ...c, obstacleturnsLeft: turns } : c);
 }
 
-// Draw one card from the deck into a hand if possible
 function drawCard(hand: CardData[], deck: CardData[]): { hand: CardData[]; deck: CardData[] } {
   if (hand.length >= MAX_HAND || deck.length === 0) return { hand, deck };
   return { hand: [...hand, deck[0]], deck: deck.slice(1) };
@@ -172,10 +167,8 @@ function drawCard(hand: CardData[], deck: CardData[]): { hand: CardData[]; deck:
 function processHumanAction(prev: LocalState, event: string, data: unknown): LocalState {
   if (prev.phase === 'over') return prev;
 
-  // requestOpponentHand is a no-op in CPU mode — mirror is always current
   if (event === 'requestOpponentHand') return prev;
 
-  // Guard: only process real actions on the human's turn
   if (!prev.isHumanTurn) return prev;
 
   switch (event) {
@@ -187,11 +180,12 @@ function processHumanAction(prev: LocalState, event: string, data: unknown): Loc
       const logMsg = `You played ${prev.humanHand[lo].name} + ${prev.humanHand[hi].name}`;
 
       if (checkWin(newHand)) {
-        return { ...prev, humanHand: newHand, phase: 'over', winner: 'human', log: addLog(prev.log, logMsg + ' → YOU WIN!') };
+        return { ...prev, humanHand: newHand, phase: 'over', winner: 'human', cpuLastDiscard: [], log: addLog(prev.log, logMsg + ' → YOU WIN!') };
       }
       return {
         ...prev,
-        humanHand: decrementObstacles(newHand), // end of human's turn → decrement human obstacles
+        humanHand: decrementObstacles(newHand),
+        cpuLastDiscard: [],
         isHumanTurn: false,
         log: addLog(prev.log, logMsg),
       };
@@ -203,11 +197,12 @@ function processHumanAction(prev: LocalState, event: string, data: unknown): Loc
       const logMsg = `You played ${prev.humanHand[idx].name} solo`;
 
       if (checkWin(newHand)) {
-        return { ...prev, humanHand: newHand, phase: 'over', winner: 'human', log: addLog(prev.log, logMsg + ' → YOU WIN!') };
+        return { ...prev, humanHand: newHand, phase: 'over', winner: 'human', cpuLastDiscard: [], log: addLog(prev.log, logMsg + ' → YOU WIN!') };
       }
       return {
         ...prev,
         humanHand: decrementObstacles(newHand),
+        cpuLastDiscard: [],
         isHumanTurn: false,
         log: addLog(prev.log, logMsg),
       };
@@ -245,13 +240,14 @@ function processHumanAction(prev: LocalState, event: string, data: unknown): Loc
       }
 
       if (checkWin(newHumanHand)) {
-        return { ...prev, humanHand: newHumanHand, cpuHand: newCpuHand, phase: 'over', winner: 'human',
+        return { ...prev, humanHand: newHumanHand, cpuHand: newCpuHand, phase: 'over', winner: 'human', cpuLastDiscard: [],
           log: addLog(prev.log, `You used ${special.name} → YOU WIN!`) };
       }
       return {
         ...prev,
-        humanHand: decrementObstacles(newHumanHand), // end of human's turn
-        cpuHand: newCpuHand,                          // cpu obstacles unchanged (their turn hasn't ended)
+        humanHand: decrementObstacles(newHumanHand),
+        cpuHand: newCpuHand,
+        cpuLastDiscard: [],
         isHumanTurn: false,
         log: addLog(prev.log, `You used ${special.name}`),
       };
@@ -262,16 +258,15 @@ function processHumanAction(prev: LocalState, event: string, data: unknown): Loc
       const newHand = drawn.hand;
       const newDeck = drawn.deck;
 
-      // Check for deadlock: full hand, no valid moves
       if (newHand.length >= MAX_HAND && !hasValidMoves(newHand)) {
         return { ...prev, humanHand: newHand, deck: newDeck, deadlockPending: true };
-        // Turn does NOT end yet — player must complete the redraw first
       }
 
       return {
         ...prev,
         humanHand: decrementObstacles(newHand),
         deck: newDeck,
+        cpuLastDiscard: [],
         isHumanTurn: false,
         log: addLog(prev.log, 'You passed'),
       };
@@ -285,10 +280,8 @@ function processHumanAction(prev: LocalState, event: string, data: unknown): Loc
       const removed: CardData[] = [];
       for (const i of sortedDesc) removed.push(...newHand.splice(i, 1));
 
-      // Return removed cards to deck (reshuffled in)
       let newDeck = shuffle([...prev.deck, ...removed]);
 
-      // Draw replacements
       const drawCount = Math.min(3, newDeck.length);
       newHand = [...newHand, ...newDeck.slice(0, drawCount)];
       newDeck = newDeck.slice(drawCount);
@@ -298,6 +291,7 @@ function processHumanAction(prev: LocalState, event: string, data: unknown): Loc
         humanHand: decrementObstacles(newHand),
         deck: newDeck,
         deadlockPending: false,
+        cpuLastDiscard: [],
         isHumanTurn: false,
         log: addLog(prev.log, 'Emergency redraw'),
       };
@@ -319,30 +313,36 @@ function applyCpuMove(prev: LocalState, move: CpuMove): LocalState {
 
     case 'playPair': {
       const lo = Math.min(move.first, move.second), hi = Math.max(move.first, move.second);
+      // FIX 2: capture the actual CardData objects before filtering
+      const discarded: CardData[] = [prev.cpuHand[lo], prev.cpuHand[hi]];
       const newCpuHand = prev.cpuHand.filter((_, i) => i !== lo && i !== hi);
       const logMsg = `CPU played ${prev.cpuHand[lo].name} + ${prev.cpuHand[hi].name}`;
 
       if (checkWin(newCpuHand)) {
-        return { ...prev, cpuHand: newCpuHand, phase: 'over', winner: 'cpu', log: addLog(prev.log, logMsg + ' → CPU WINS!') };
+        return { ...prev, cpuHand: newCpuHand, cpuLastDiscard: discarded, phase: 'over', winner: 'cpu', log: addLog(prev.log, logMsg + ' → CPU WINS!') };
       }
       return {
         ...prev,
-        cpuHand: decrementObstacles(newCpuHand), // end of CPU's turn
+        cpuHand: decrementObstacles(newCpuHand),
+        cpuLastDiscard: discarded,
         isHumanTurn: true,
         log: addLog(prev.log, logMsg),
       };
     }
 
     case 'playCard': {
+      // FIX 2: capture the card before filtering
+      const discarded: CardData[] = [prev.cpuHand[move.idx]];
       const newCpuHand = prev.cpuHand.filter((_, i) => i !== move.idx);
       const logMsg = `CPU played ${prev.cpuHand[move.idx].name} solo`;
 
       if (checkWin(newCpuHand)) {
-        return { ...prev, cpuHand: newCpuHand, phase: 'over', winner: 'cpu', log: addLog(prev.log, logMsg + ' → CPU WINS!') };
+        return { ...prev, cpuHand: newCpuHand, cpuLastDiscard: discarded, phase: 'over', winner: 'cpu', log: addLog(prev.log, logMsg + ' → CPU WINS!') };
       }
       return {
         ...prev,
         cpuHand: decrementObstacles(newCpuHand),
+        cpuLastDiscard: discarded,
         isHumanTurn: true,
         log: addLog(prev.log, logMsg),
       };
@@ -357,7 +357,6 @@ function applyCpuMove(prev: LocalState, move: CpuMove): LocalState {
 
       if (special.type === 'VALUE_SHIFT') {
         if (targetOwner === 'opponent') {
-          // CPU targets human hand
           newCpuHand   = newCpuHand.filter((_, i) => i !== cardIdx);
           newHumanHand = applyValueShiftOn(newHumanHand, targetIdx, delta);
         } else {
@@ -379,10 +378,12 @@ function applyCpuMove(prev: LocalState, move: CpuMove): LocalState {
         }
       }
 
+      // Special card plays don't show in discard pile (card is consumed, not "played")
       return {
         ...prev,
-        humanHand: newHumanHand,                   // human obstacles unchanged (their turn hasn't ended)
-        cpuHand: decrementObstacles(newCpuHand),   // end of CPU's turn
+        humanHand: newHumanHand,
+        cpuHand: decrementObstacles(newCpuHand),
+        cpuLastDiscard: [],
         isHumanTurn: true,
         log: addLog(prev.log, `CPU used ${special.name}`),
       };
@@ -393,7 +394,6 @@ function applyCpuMove(prev: LocalState, move: CpuMove): LocalState {
       let newCpuHand = drawn.hand;
       let newDeck    = drawn.deck;
 
-      // Auto-handle CPU deadlock: silently redraw 3 non-special cards
       if (newCpuHand.length >= MAX_HAND && !hasValidMoves(newCpuHand)) {
         const candidates = newCpuHand
           .map((c, i) => ({ c, i }))
@@ -414,6 +414,7 @@ function applyCpuMove(prev: LocalState, move: CpuMove): LocalState {
         ...prev,
         cpuHand: decrementObstacles(newCpuHand),
         deck: newDeck,
+        cpuLastDiscard: [],
         isHumanTurn: true,
         log: addLog(prev.log, 'CPU passed'),
       };
@@ -468,10 +469,9 @@ function deriveGameState(local: LocalState, name: string, difficulty: Difficulty
     isMyTurn:        local.isHumanTurn,
     myHand:          local.humanHand,
     opponentHandSize: local.cpuHand.length,
-    // Mirror exposes only obstacle info — values stay hidden
-    opponentHandMirror: buildMirror(local.cpuHand),
+    opponentHandMirror: local.cpuHand,
     deckRemaining:   local.deck.length,
-    myObstacles:     '',   // obstacle info lives on card.obstacleturnsLeft directly
+    myObstacles:     '',
     oppObstacles:    '',
     deadlockPending: local.deadlockPending,
     gameOverResult,
@@ -479,6 +479,8 @@ function deriveGameState(local: LocalState, name: string, difficulty: Difficulty
     loserHand,
     log:             local.log,
     roomCode:        '',
+    // FIX 2: surface CPU's last discarded cards so GameBoard can show them
+    opponentLastDiscard: local.cpuLastDiscard,
   };
 }
 
@@ -499,8 +501,6 @@ export function useCpuGame(): UseCpuGameReturn {
   const [playerName, setPlayerName] = useState('');
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
 
-  // ── Public controls ──────────────────────────────────────
-
   const startGame = useCallback((name: string, diff: Difficulty) => {
     setPlayerName(name);
     setDifficulty(diff);
@@ -516,8 +516,6 @@ export function useCpuGame(): UseCpuGameReturn {
     setLocal(prev => prev ? { ...prev, deadlockPending: false } : null);
   }, []);
 
-  // ── Human action handler (passed to GameBoard as `send`) ──
-
   const send = useCallback((event: string, data?: unknown) => {
     setLocal(prev => {
       if (!prev) return prev;
@@ -530,7 +528,6 @@ export function useCpuGame(): UseCpuGameReturn {
   useEffect(() => {
     if (!local || local.isHumanTurn || local.phase !== 'playing') return;
 
-    // Randomised "thinking" delay so the CPU doesn't feel instant
     const thinkMs = 900 + Math.random() * 700;
     const id = setTimeout(() => {
       setLocal(prev => {
@@ -547,8 +544,6 @@ export function useCpuGame(): UseCpuGameReturn {
 
     return () => clearTimeout(id);
   }, [local, difficulty]);
-
-  // ── Derive public GameState ───────────────────────────────
 
   const state = useMemo(
     () => local ? deriveGameState(local, playerName, difficulty) : emptyGameState(),

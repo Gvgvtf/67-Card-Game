@@ -29,6 +29,10 @@ export interface GameState {
   loserName: string;
   log: string[];
   deadlockPending: boolean;
+  /** The exact CardData objects the opponent discarded on their most recent turn.
+   *  Populated by useCpuGame / useSocket when the opponent plays.
+   *  Used by GameBoard to show real card faces in the discard pile. */
+  opponentLastDiscard: CardData[];
 }
 
 export function emptyGameState(): GameState {
@@ -51,6 +55,7 @@ export function emptyGameState(): GameState {
     loserName: '',
     log: [],
     deadlockPending: false,
+    opponentLastDiscard: [],
   };
 }
 

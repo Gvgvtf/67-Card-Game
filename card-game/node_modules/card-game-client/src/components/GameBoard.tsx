@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { CardView } from './CardView';
 import { TimingBar } from './TimingBar';
 import { GameState, CardData, isSpecial, combinedResult, parseObstacles } from '../types/game';
@@ -12,8 +12,6 @@ interface Props {
 
 type UIMode = 'idle' | 'selected1' | 'selected2' | 'choosingTarget' | 'choosingOp' | 'redraw';
 
-// ─── Discard pile ───────────────────────────────────────────────────────────
-interface DiscardEntry { cards: CardData[]; faceDown: boolean; }
 
 const TURN_SECONDS = 30;
 
@@ -34,101 +32,55 @@ export const GameBoard: React.FC<Props> = ({ state, send, onClearDeadlock, onPla
   const [timingTarget, setTimingTarget] = useState<{ owner: 'self' | 'opponent'; idx: number; specialIdx: number } | null>(null);
   const [timeLeft, setTimeLeft] = useState(TURN_SECONDS);
 
-  // ─── NEW: Discard pile state ──────────────────────────────────────────────
-  const [discardPile, setDiscardPile] = useState<DiscardEntry[]>([]);
-  const prevMyHandRef   = useRef(state.myHand);
-  const prevOppSizeRef  = useRef(state.opponentHandSize);
-  const discardTotal    = discardPile.reduce((s, e) => s + e.cards.length, 0);
+  // Flat list of the last 2 individual cards played (most-recent first).
+  // index 0 = most recent card (slot B, right/top), index 1 = card before that (slot A, left/bottom).
+  // A pair play pushes 2 cards: selected1 at [0], selected2 at [1].
+  // A solo or opponent single-card play pushes 1 card at [0], shifting the old [0] to [1].
+  const [discardPile, setDiscardPile] = useState<CardData[]>([]);
+  const [showCoinFlip, setShowCoinFlip] = useState(true);
+  const myObstacles  = useMemo(() => parseObstacles(state.myObstacles),  [state.myObstacles]);
+  const oppObstacles = useMemo(() => parseObstacles(state.oppObstacles), [state.oppObstacles]);
 
-  // ─── NEW: Coin flip shown once on first mount ─────────────────────────────
-  const [showCoinFlip, setShowCoinFlip] = useState(state.phase !== 'over');
+  // ─── Track OPPONENT discards via opponentLastDiscard ─────────────────────
+  const prevOpponentDiscardKeyRef = useRef<string>('');
+  const prevPhaseRef = useRef<string>(state.phase);
 
-  // Separate obstacle state for opponent (never reveals card faces)
-  const oppObstacles = parseObstacles(state.oppObstacles);
-  const myObstacles = parseObstacles(state.myObstacles);
-
-  // Reset selection state when turn changes
   useEffect(() => {
-    if (!state.isMyTurn) {
-      setUiMode('idle');
-      setSelected1Idx(-1);
-      setSelected1Card(null);
-      setSelected2Idx(-1);
-      setSelected2Card(null);
-      setActiveSpecialIdx(-1);
-      setActiveSpecialCard(null);
-      setTargetOwner('self');
-      setTargetIdx(-1);
-      setHoveredMyCard(-1);
-      setHoveredOppCard(-1);
+    if (state.phase !== 'playing') return;
+    const cards = state.opponentLastDiscard;
+    if (!cards || cards.length === 0) return;
+    const key = cards.map((c: CardData) => c.id).join(',');
+    if (key === prevOpponentDiscardKeyRef.current) return;
+    prevOpponentDiscardKeyRef.current = key;
+    // Push each card individually so both slots fill correctly for pairs
+    setDiscardPile(p => [...cards, ...p].slice(0, 2));
+  }, [state.opponentLastDiscard, state.phase]);
+
+  // ─── Reset discard pile when a brand-new game begins ────────────────────────
+  useEffect(() => {
+    const prevPhase = prevPhaseRef.current;
+    prevPhaseRef.current = state.phase;
+    if (state.phase === 'playing' && prevPhase !== 'playing') {
+      setDiscardPile([]);
+      prevOpponentDiscardKeyRef.current = '';
     }
-  }, [state.isMyTurn]);
-
-  // Turn timer — use ref to track whether turn is still active before sending
-  const isMyTurnRef = useRef(state.isMyTurn);
-  useEffect(() => { isMyTurnRef.current = state.isMyTurn; }, [state.isMyTurn]);
-
-  useEffect(() => {
-    setTimeLeft(TURN_SECONDS);
-    const interval = setInterval(() => {
-      setTimeLeft(t => {
-        if (t <= 1) {
-          clearInterval(interval);
-          if (isMyTurnRef.current) send('passTurn');
-          return 0;
-        }
-        return t - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [state.isMyTurn, send]);
-
-  // ESC key to cancel targeting/selection
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') resetUI();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-
-  // ─── NEW: Track MY discards by watching hand shrink ──────────────────────
-  useEffect(() => {
-    const prev = prevMyHandRef.current;
-    const curr = state.myHand;
-    if (prev.length > 0 && curr.length < prev.length && state.phase === 'playing') {
-      const currIds = new Set(curr.map(c => c.id));
-      const removed = prev.filter(c => !currIds.has(c.id));
-      // 1 = solo/special play, 2 = pair; ignore emergency redraw (3 cards)
-      if (removed.length >= 1 && removed.length <= 2) {
-        setDiscardPile(p => [{ cards: removed, faceDown: false }, ...p.slice(0, 9)]);
-      }
-    }
-    prevMyHandRef.current = curr;
-  }, [state.myHand, state.phase]);
-
-  // ─── NEW: Track OPPONENT discards by watching hand size shrink ───────────
-  useEffect(() => {
-    const prev = prevOppSizeRef.current;
-    const curr = state.opponentHandSize;
-    if (prev > 0 && curr < prev && state.phase === 'playing') {
-      const diff = Math.min(prev - curr, 2);
-      const faceDownCards: CardData[] = Array.from({ length: diff }, (_, i) => ({
-        id: -(Date.now() + i + 5000),
-        type: 'STANDARD' as const,
-        value: 0,
-        name: '?',
-        obstacleturnsLeft: 0,
-      }));
-      setDiscardPile(p => [{ cards: faceDownCards, faceDown: true }, ...p.slice(0, 9)]);
-    }
-    prevOppSizeRef.current = curr;
-  }, [state.opponentHandSize, state.phase]);
+  }, [state.phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── NEW: Close coin flip when game ends ─────────────────────────────────
   useEffect(() => {
     if (state.phase === 'over') setShowCoinFlip(false);
   }, [state.phase]);
+
+  // ─── Turn timer ───────────────────────────────────────────────────────────
+  useEffect(() => {
+    setTimeLeft(TURN_SECONDS);
+  }, [state.isMyTurn]);
+
+  useEffect(() => {
+    if (state.phase !== 'playing') return;
+    const id = setInterval(() => setTimeLeft(t => Math.max(0, t - 1)), 1000);
+    return () => clearInterval(id);
+  }, [state.isMyTurn, state.phase]);
 
   const isMyCardObstructed = useCallback((idx: number): boolean => {
     return (myObstacles.get(idx) ?? 0) > 0 || (state.myHand[idx]?.obstacleturnsLeft ?? 0) > 0;
@@ -148,6 +100,15 @@ export const GameBoard: React.FC<Props> = ({ state, send, onClearDeadlock, onPla
     setTargetOwner('self'); setTargetIdx(-1);
     setHoveredMyCard(-1); setHoveredOppCard(-1);
   }, []);
+
+  // ─── Autopass when turn timer expires ─────────────────────────────────────
+  useEffect(() => {
+    if (timeLeft > 0) return;
+    if (!state.isMyTurn || state.phase !== 'playing') return;
+    if (state.deadlockPending || showTimingBar) return;
+    send('passTurn');
+    resetUI();
+  }, [timeLeft, state.isMyTurn, state.phase, state.deadlockPending, showTimingBar, send, resetUI]);
 
   const handleMyCardClick = useCallback((idx: number) => {
     if (!state.isMyTurn) return;
@@ -221,8 +182,11 @@ export const GameBoard: React.FC<Props> = ({ state, send, onClearDeadlock, onPla
     }
   }, [state.isMyTurn, uiMode, activeSpecialCard, activeSpecialIdx, isOppCardObstructed]);
 
+  // ─── FIX 1: Push directly to discard pile in selection order ─────────────
   const handlePlaySolo = useCallback(() => {
     if (!selected1Card || (selected1Card.value !== 6 && selected1Card.value !== 7)) return;
+    // Solo: push one card to the front of the flat pile, keep max 2
+    setDiscardPile(p => [selected1Card, ...p].slice(0, 2));
     send('playCard', selected1Idx);
     resetUI();
   }, [selected1Card, selected1Idx, send, resetUI]);
@@ -231,9 +195,11 @@ export const GameBoard: React.FC<Props> = ({ state, send, onClearDeadlock, onPla
     if (selected1Idx === -1 || selected2Idx === -1) return;
     const lo = Math.min(selected1Idx, selected2Idx);
     const hi = Math.max(selected1Idx, selected2Idx);
+    // Pair: replace pile with both cards flat [selected1 (slot B), selected2 (slot A)]
+    setDiscardPile([selected1Card!, selected2Card!]);
     send('playPair', { first: lo, second: hi });
     resetUI();
-  }, [selected1Idx, selected2Idx, send, resetUI]);
+  }, [selected1Idx, selected2Idx, selected1Card, selected2Card, send, resetUI]);
 
   const handleOpButton = useCallback((delta: number) => {
     if (uiMode !== 'choosingOp') return;
@@ -279,6 +245,8 @@ export const GameBoard: React.FC<Props> = ({ state, send, onClearDeadlock, onPla
   const myFinalHand = state.gameOverResult === 'win' || state.gameOverResult === 'draw' ? state.winnerHand : state.loserHand;
   const oppDisplayCount = state.phase === 'over' && oppFinalHand.length > 0 ? oppFinalHand.length : state.opponentHandSize;
   const myDisplayHand = state.phase === 'over' && myFinalHand.length > 0 ? myFinalHand : state.myHand;
+
+  const discardTotal = discardPile.length;
 
   let leftBlocked = false;
   let rightBlocked = false;
@@ -545,77 +513,69 @@ export const GameBoard: React.FC<Props> = ({ state, send, onClearDeadlock, onPla
           }}>
             {timeLeft}
           </div>
-          {state.log[0] && (
-            <div style={{ fontSize: '10px', color: '#5a7a5a', marginTop: '8px', maxWidth: '150px', lineHeight: 1.5, textAlign: 'center' }}>
-              {state.log[0].slice(0, 70)}
-            </div>
-          )}
         </div>
 
-        {/* ─── NEW: Discard pile ─────────────────────────────────────────── */}
-        <div style={{ textAlign: 'center', minWidth: 96 }}>
+        <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '11px', color: '#6b8c6b', marginBottom: '6px', letterSpacing: '1px' }}>
             DISCARD{discardTotal > 0 ? ` · ${discardTotal}` : ''}
           </div>
-          {discardPile.length === 0 ? (
-            <div style={{
-              width: 80, height: 115, background: 'rgba(0,0,0,0.3)', borderRadius: 7,
-              border: '1px dashed rgba(139,115,85,0.25)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <span style={{ fontSize: '10px', color: '#3a2a10', letterSpacing: '1px' }}>EMPTY</span>
-            </div>
-          ) : (
-            <div style={{ position: 'relative', width: 80, height: 115, margin: '0 auto', overflow: 'visible' }}>
-              {/* Historical stack — older entries peeking behind */}
-              {discardPile.slice(1, 3).map((_, si) => (
-                <div key={si} style={{
-                  position: 'absolute',
-                  top: (si + 1) * 2, left: (si + 1) * 2,
-                  zIndex: si, opacity: 0.45 - si * 0.12,
-                  pointerEvents: 'none',
-                }}>
-                  <CardView
-                    card={{ id: -8000 - si, type: 'STANDARD' as const, value: 0, name: '?', obstacleturnsLeft: 0 }}
-                    faceDown
-                  />
-                </div>
-              ))}
-              {/* Most recent play — slides in with animation; key change triggers re-mount */}
-              <div
-                key={discardPile.length}
-                style={{ position: 'absolute', inset: 0, zIndex: 10, animation: 'discardIn 0.25s ease-out' }}
-              >
-                {discardPile[0].cards.length === 1 ? (
-                  /* Solo / special play */
-                  <CardView
-                    card={discardPile[0].cards[0]}
-                    faceDown={discardPile[0].faceDown}
-                  />
-                ) : (
-                  /* Pair play — fan two cards from bottom-centre */
-                  <>
-                    <div style={{ position: 'absolute', top: 0, left: 0, transformOrigin: 'bottom center', zIndex: 1 }}>
-                      <CardView
-                        card={discardPile[0].cards[0]}
-                        faceDown={discardPile[0].faceDown}
-                        style={{ transform: 'rotate(-11deg) translate(-7px, -2px)' }}
-                      />
-                    </div>
-                    <div style={{ position: 'absolute', top: 0, left: 0, transformOrigin: 'bottom center', zIndex: 2 }}>
-                      <CardView
-                        card={discardPile[0].cards[1]}
-                        faceDown={discardPile[0].faceDown}
-                        style={{ transform: 'rotate(11deg) translate(7px, -2px)' }}
-                      />
-                    </div>
-                  </>
-                )}
+          <div style={{ position: 'relative', width: 128, height: 128, margin: '0 auto' }}>
+
+            {/* ── SLOT A — older play, tilted left ── */}
+            {discardPile.length >= 2 ? (
+              <div style={{
+                position: 'absolute',
+                top: 6, left: 0,
+                transform: 'rotate(-9deg)',
+                transformOrigin: 'center center',
+                zIndex: 1,
+                opacity: 0.88,
+              }}>
+                <CardView card={discardPile[1]} faceDown={false} />
               </div>
-            </div>
-          )}
+            ) : (
+              <div style={{
+                position: 'absolute',
+                top: 6, left: 0, width: 80, height: 115,
+                borderRadius: 7,
+                border: '1px dashed rgba(139,115,85,0.30)',
+                transform: 'rotate(-9deg)',
+                transformOrigin: 'center center',
+                zIndex: 1,
+                boxSizing: 'border-box' as const,
+              }} />
+            )}
+
+            {/* ── SLOT B — most recent play, tilted right ── */}
+            {discardPile.length >= 1 ? (
+              <div
+                key={discardPile[0]?.id ?? discardPile.length}
+                style={{
+                  position: 'absolute',
+                  top: 6, left: 42,
+                  transform: 'rotate(9deg)',
+                  transformOrigin: 'center center',
+                  zIndex: 2,
+                  animation: 'discardIn 0.25s ease-out',
+                }}
+              >
+                <CardView card={discardPile[0]} faceDown={false} />
+              </div>
+            ) : (
+              <div style={{
+                position: 'absolute',
+                top: 6, left: 42, width: 80, height: 115,
+                borderRadius: 7,
+                border: '1px dashed rgba(139,115,85,0.30)',
+                transform: 'rotate(9deg)',
+                transformOrigin: 'center center',
+                zIndex: 2,
+                boxSizing: 'border-box' as const,
+              }} />
+            )}
+
+          </div>
         </div>
-        {/* ─────────────────────────────────────────────────────────────────── */}
       </div>
 
       {/* ─── OPERATION BUTTONS ─── */}
@@ -739,7 +699,7 @@ export const GameBoard: React.FC<Props> = ({ state, send, onClearDeadlock, onPla
         </div>
       </div>
 
-      {/* ─── NEW: Coin flip overlay — shown once at game start ──────────── */}
+      {/* ─── Coin flip overlay ─── */}
       {showCoinFlip && state.phase === 'playing' && (
         <CoinFlipOverlay
           isHeads={state.isMyTurn}
@@ -777,7 +737,7 @@ export const GameBoard: React.FC<Props> = ({ state, send, onClearDeadlock, onPla
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// NEW: Coin Flip Overlay
+// Coin Flip Overlay
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CoinFlipOverlay: React.FC<{
@@ -788,8 +748,6 @@ const CoinFlipOverlay: React.FC<{
   const [phase, setPhase] = useState<'spinning' | 'result'>('spinning');
   const [canDismiss, setCanDismiss] = useState(false);
 
-  // Keep a stable ref so the effect never needs to re-run when the parent
-  // re-renders (GameBoard re-renders every second for the turn timer).
   const onDoneRef = useRef(onDone);
   useEffect(() => { onDoneRef.current = onDone; });
 
@@ -798,7 +756,7 @@ const CoinFlipOverlay: React.FC<{
     const t2 = setTimeout(() => setCanDismiss(true),         2600);
     const t3 = setTimeout(() => onDoneRef.current(),         4800);
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
-  }, []); // ← empty: runs once on mount, timers are never reset
+  }, []);
 
   const accentColor = isHeads ? '#f0c040' : '#c084fc';
 
@@ -814,19 +772,16 @@ const CoinFlipOverlay: React.FC<{
         cursor: canDismiss ? 'pointer' : 'default',
       }}
     >
-      {/* Ambient glow that brightens once result is known */}
       <div style={{
         position: 'absolute', width: 460, height: 460, borderRadius: '50%', pointerEvents: 'none',
         background: `radial-gradient(circle, ${accentColor}${phase === 'result' ? '20' : '08'} 0%, transparent 70%)`,
         transition: 'background 1.2s ease',
       }} />
 
-      {/* Label */}
       <div style={{ fontSize: '11px', letterSpacing: '4px', color: 'rgba(240,192,64,0.35)', marginBottom: '2.5rem', textTransform: 'uppercase' }}>
         determining first turn
       </div>
 
-      {/* 3-D coin */}
       <div style={{ perspective: '500px', marginBottom: '2.5rem' }}>
         <div style={{
           width: 136, height: 136,
@@ -837,7 +792,6 @@ const CoinFlipOverlay: React.FC<{
             ? `${isHeads ? 'coinLandHeads' : 'coinLandTails'} 1.95s cubic-bezier(0.25, 0.1, 0.15, 1) forwards`
             : 'coinGlow 2s ease-in-out infinite',
         }}>
-          {/* ── Front face: HEADS (you go first) ── */}
           <div style={{
             position: 'absolute', inset: 0, borderRadius: '50%',
             background: 'radial-gradient(circle at 36% 30%, #ffe76a 0%, #dba400 55%, #a07000 100%)',
@@ -851,7 +805,6 @@ const CoinFlipOverlay: React.FC<{
             <div style={{ fontSize: '9px', color: 'rgba(80,40,0,0.55)', letterSpacing: '2px' }}>HEADS</div>
           </div>
 
-          {/* ── Back face: TAILS (opponent goes first) ── */}
           <div style={{
             position: 'absolute', inset: 0, borderRadius: '50%',
             background: 'radial-gradient(circle at 36% 30%, #f0d055 0%, #c89000 55%, #907000 100%)',
@@ -868,10 +821,8 @@ const CoinFlipOverlay: React.FC<{
         </div>
       </div>
 
-      {/* Result text — fades in after the coin lands */}
       {phase === 'result' && (
         <div style={{ textAlign: 'center', animation: 'fadeInUp 0.55s ease-out both' }}>
-          {/* Decorative rule */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '0.9rem' }}>
             <div style={{ flex: 1, height: 1, background: `linear-gradient(to right, transparent, ${accentColor}40)` }} />
             <span style={{ color: accentColor, fontSize: '14px' }}>{isHeads ? '★' : '◆'}</span>
@@ -909,7 +860,7 @@ const CoinFlipOverlay: React.FC<{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Existing helpers (unchanged)
+// Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 function isWinCard(card: CardData) {

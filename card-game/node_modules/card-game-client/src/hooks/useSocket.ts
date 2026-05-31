@@ -37,6 +37,7 @@ export function useSocket(setState: SetState) {
         myObstacles: '',
         oppObstacles: '',
         deadlockPending: false,
+        opponentLastDiscard: [],
         log: ['Game started! Arrange [6, 7] to win.'],
       }));
     });
@@ -48,8 +49,10 @@ export function useSocket(setState: SetState) {
         deckRemaining,
         myObstacles: obstacleData ?? '',
         isMyTurn: true,
-        opponentHandMirror: [],  // always clear mirror when turn starts
-        deadlockPending: false,  // clear any stale deadlock state
+        opponentHandMirror: [],
+        deadlockPending: false,
+        // Don't clear opponentLastDiscard here — let the discard effect in
+        // GameBoard consume it first; it will be cleared on the next opponent play.
       }));
     });
 
@@ -60,7 +63,7 @@ export function useSocket(setState: SetState) {
         opponentHandSize,
         oppObstacles: obstacleData ?? '',
         isMyTurn: false,
-        opponentHandMirror: [],  // clear mirror when opponent's turn starts
+        opponentHandMirror: [],
       }));
     });
 
@@ -69,12 +72,10 @@ export function useSocket(setState: SetState) {
     });
 
     socket.on('opponentHandSize', (size: number) => {
-      // Only update hand size, never reveal mirror
       setState(s => ({ ...s, opponentHandSize: size, opponentHandMirror: [] }));
     });
 
     socket.on('opponentHand', (hand: CardData[]) => {
-      // Mirror is stored but ONLY used for obstacle state, never to show card faces
       setState(s => ({ ...s, opponentHandMirror: hand }));
     });
 
@@ -84,6 +85,14 @@ export function useSocket(setState: SetState) {
 
     socket.on('oppObstacles', (data: string) => {
       setState(s => ({ ...s, oppObstacles: data ?? '' }));
+    });
+
+    // FIX 2 (multiplayer): server emits the cards the opponent just played
+    // so we can show them face-up in the discard pile.
+    // Add to your server: socket.to(opponentSocketId).emit('opponentPlayed', discardedCards)
+    // whenever a player plays a pair or solo card.
+    socket.on('opponentPlayed', (cards: CardData[]) => {
+      setState(s => ({ ...s, opponentLastDiscard: cards }));
     });
 
     socket.on('gameOver', ({ winner, winnerHand, loserName, loserHand }) => {
